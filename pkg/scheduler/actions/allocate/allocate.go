@@ -44,29 +44,37 @@ func (alloc *allocateAction) Execute(ssn *framework.Session) {
 	glog.V(3).Infof("Enter Allocate ...")
 	defer glog.V(3).Infof("Leaving Allocate ...")
 
-	queues := util.NewPriorityQueue(ssn.QueueOrderFn)
-	jobsMap := map[api.QueueID]*util.PriorityQueue{}
+	// order queue based on QueueOrderFn, queuesPQ is a PQ containing "job queue"
+	queuesPQ := util.NewPriorityQueue(ssn.QueueOrderFn)
+	queueIdToPQMap := map[api.QueueID]*util.PriorityQueue{}
 
+	// There are 3 PQs:
+	// 1. A PQ of job queuesPQ
+	// 2. Each job queue has a PQ of jobs
+	// 3. Each job has a PQ of tasks
+
+	// For each job
 	for _, job := range ssn.Jobs {
 		if queue, found := ssn.Queues[job.Queue]; found {
-			queues.Push(queue)
+			// Push queue of the job to PQ
+			queuesPQ.Push(queue)
 		} else {
 			glog.Warningf("Skip adding Job <%s/%s> because its queue %s is not found",
 				job.Namespace, job.Name, job.Queue)
 			continue
 		}
 
-		if _, found := jobsMap[job.Queue]; !found {
-			jobsMap[job.Queue] = util.NewPriorityQueue(ssn.JobOrderFn)
+		// push the job to the PQ of its corresponding job queue
+		// TODO: the queueIdToPQMap can be abstracted by a member function of the queue
+		if _, found := queueIdToPQMap[job.Queue]; !found {
+			queueIdToPQMap[job.Queue] = util.NewPriorityQueue(ssn.JobOrderFn)
 		}
 
 		glog.V(4).Infof("Added Job <%s/%s> into Queue <%s>", job.Namespace, job.Name, job.Queue)
-		jobsMap[job.Queue].Push(job)
+		queueIdToPQMap[job.Queue].Push(job)
 	}
 
-	glog.V(3).Infof("Try to allocate resource to %d Queues", len(jobsMap))
-
-	pendingTasks := map[api.JobID]*util.PriorityQueue{}
+	glog.V(3).Infof("Try to allocate resource to %d Queues", len(queueIdToPQMap))
 
 	allNodes := util.GetNodeList(ssn.Nodes)
 
@@ -83,71 +91,72 @@ func (alloc *allocateAction) Execute(ssn *framework.Session) {
 				task.Namespace, task.Name, node.Name)
 		}
 
-		return ssn.PredicateFn(task, node)
+		return ssn.RunPredicatePlugins(task, node)
 	}
 
 	for {
-		if queues.Empty() {
+		if queuesPQ.Empty() {
 			break
 		}
 
-		queue := queues.Pop().(*api.QueueInfo)
-		if ssn.Overused(queue) {
+		// Find the next most important queue
+		queue := queuesPQ.Pop().(*api.QueueInfo)
+		if ssn.RunOverusedPlugins(queue) {
 			glog.V(3).Infof("Queue <%s> is overused, ignore it.", queue.Name)
 			continue
 		}
 
-		jobs, found := jobsMap[queue.UID]
+		jobsPQ, found := queueIdToPQMap[queue.UID]
 
 		glog.V(3).Infof("Try to allocate resource to Jobs in Queue <%v>", queue.Name)
 
-		if !found || jobs.Empty() {
-			glog.V(4).Infof("Can not find jobs for queue %s.", queue.Name)
+		if !found || jobsPQ.Empty() {
+			glog.V(4).Infof("Can not find jobsPQ for queue %s.", queue.Name)
 			continue
 		}
 
-		job := jobs.Pop().(*api.JobInfo)
-		if _, found := pendingTasks[job.UID]; !found {
-			tasks := util.NewPriorityQueue(ssn.TaskOrderFn)
-			for _, task := range job.TaskStatusIndex[api.Pending] {
-				// Skip BestEffort task in 'allocate' action.
-				if task.Resreq.IsEmpty() {
-					glog.V(4).Infof("Task <%v/%v> is BestEffort task, skip it.",
-						task.Namespace, task.Name)
-					continue
-				}
-
-				tasks.Push(task)
+		// Then find the most important job from the most important queue
+		job := jobsPQ.Pop().(*api.JobInfo)
+		tasksPQ := util.NewPriorityQueue(ssn.TaskOrderFn)
+		for _, task := range job.TaskStatusIndex[api.Pending] {// find pending tasksPQ
+			// Skip BestEffort task in 'allocate' action.
+			if task.Resreq.IsEmpty() {
+				glog.V(4).Infof("Task <%v/%v> is BestEffort task, skip it.",
+					task.Namespace, task.Name)
+				continue
 			}
-			pendingTasks[job.UID] = tasks
+
+			tasksPQ.Push(task)
 		}
-		tasks := pendingTasks[job.UID]
 
 		glog.V(3).Infof("Try to allocate resource to %d tasks of Job <%v/%v>",
-			tasks.Len(), job.Namespace, job.Name)
+			tasksPQ.Len(), job.Namespace, job.Name)
 
-		for !tasks.Empty() {
-			task := tasks.Pop().(*api.TaskInfo)
+		for !tasksPQ.Empty() {
+			// Then find next most important task of the job
+			task := tasksPQ.Pop().(*api.TaskInfo)
 
 			glog.V(3).Infof("There are <%d> nodes for Job <%v/%v>",
 				len(ssn.Nodes), job.Namespace, job.Name)
 
 			//any task that doesn't fit will be the last processed
 			//within this loop context so any existing contents of
-			//NodesFitDelta are for tasks that eventually did fit on a
+			//NodesFitDelta are for tasksPQ that eventually did fit on a
 			//node
 			if len(job.NodesFitDelta) > 0 {
 				job.NodesFitDelta = make(api.NodeResourceMap)
 			}
 
-			predicateNodes := util.PredicateNodes(task, allNodes, predicateFn)
-			if len(predicateNodes) == 0 {
-				// Further Tasks should be checked because tasks are ordered in priority, so it affects taskPriority within Job,
-				// so if one task fails predicates, it should not check further tasks in same job, should skip to next job.
+			// Run the predicate functions for the task and all nodes
+			nodesLeft := util.FilterNodes(task, allNodes, predicateFn)
+			if len(nodesLeft) == 0 {
+				// Further Tasks should be checked because tasksPQ are ordered in priority, so it affects taskPriority within Job,
+				// so if one task fails predicates, it should not check further tasksPQ in same job, should skip to next job.
 				break
 			}
 
-			priorityList, err := util.PrioritizeNodes(task, predicateNodes, ssn.NodePrioritizers())
+			// Then run priority functions
+			priorityList, err := util.PrioritizeNodes(task, nodesLeft, ssn.NodePrioritizers())
 			if err != nil {
 				glog.Errorf("Prioritize Nodes for task %s err: %v", task.UID, err)
 				break
@@ -156,7 +165,7 @@ func (alloc *allocateAction) Execute(ssn *framework.Session) {
 			nodeName := util.SelectBestNode(priorityList)
 			node := ssn.Nodes[nodeName]
 
-			// Allocate idle resource to the task.
+			// Allocate idle resource to the task if node idle resource is enough for requested resource by the task
 			if task.InitResreq.LessEqual(node.Idle) {
 				glog.V(3).Infof("Binding Task <%v/%v> to node <%v>",
 					task.Namespace, task.Name, node.Name)
@@ -183,13 +192,13 @@ func (alloc *allocateAction) Execute(ssn *framework.Session) {
 			}
 
 			if ssn.JobReady(job) {
-				jobs.Push(job)
+				jobsPQ.Push(job)
 				break
 			}
 		}
 
 		// Added Queue back until no job in Queue.
-		queues.Push(queue)
+		queuesPQ.Push(queue)
 	}
 }
 

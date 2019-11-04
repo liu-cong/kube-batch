@@ -41,6 +41,7 @@ tiers:
   - name: nodeorder
 `
 
+// parse conf to actions and tiers
 func loadSchedulerConf(confStr string) ([]framework.Action, []conf.Tier, error) {
 	var actions []framework.Action
 
@@ -72,6 +73,8 @@ func loadSchedulerConf(confStr string) ([]framework.Action, []conf.Tier, error) 
 	return actions, schedulerConf.Tiers, nil
 }
 
+
+// read conf from file
 func readSchedulerConf(confPath string) (string, error) {
 	dat, err := ioutil.ReadFile(confPath)
 	if err != nil {

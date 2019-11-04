@@ -23,6 +23,7 @@ import (
 	"github.com/golang/glog"
 
 	"k8s.io/kubernetes/pkg/scheduler/algorithm"
+	// call scheduler predicates directly
 	"k8s.io/kubernetes/pkg/scheduler/algorithm/predicates"
 	"k8s.io/kubernetes/pkg/scheduler/cache"
 
@@ -199,8 +200,9 @@ func (pp *predicatesPlugin) OnSessionOpen(ssn *framework.Session) {
 				task.Namespace, task.Name, node.Name)
 		}
 
+		// configurable predicates
 		if predicate.memoryPressureEnable {
-			// CheckNodeMemoryPressurePredicate
+			// 1. CheckNodeMemoryPressurePredicate
 			fit, _, err = predicates.CheckNodeMemoryPressurePredicate(task.Pod, nil, nodeInfo)
 			if err != nil {
 				return err
@@ -216,7 +218,7 @@ func (pp *predicatesPlugin) OnSessionOpen(ssn *framework.Session) {
 		}
 
 		if predicate.diskPressureEnable {
-			// CheckNodeDiskPressurePredicate
+			// 2. CheckNodeDiskPressurePredicate
 			fit, _, err = predicates.CheckNodeDiskPressurePredicate(task.Pod, nil, nodeInfo)
 			if err != nil {
 				return err
@@ -232,7 +234,7 @@ func (pp *predicatesPlugin) OnSessionOpen(ssn *framework.Session) {
 		}
 
 		if predicate.pidPressureEnable {
-			// CheckNodePIDPressurePredicate
+			// 3. CheckNodePIDPressurePredicate
 			fit, _, err = predicates.CheckNodePIDPressurePredicate(task.Pod, nil, nodeInfo)
 			if err != nil {
 				return err

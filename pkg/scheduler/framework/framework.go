@@ -31,6 +31,7 @@ func OpenSession(cache cache.Cache, tiers []conf.Tier) *Session {
 	ssn := openSession(cache)
 	ssn.Tiers = tiers
 
+	// register plugins
 	for _, tier := range tiers {
 		for _, plugin := range tier.Plugins {
 			if pb, found := GetPluginBuilder(plugin.Name); !found {
@@ -44,6 +45,7 @@ func OpenSession(cache cache.Cache, tiers []conf.Tier) *Session {
 
 	for _, plugin := range ssn.plugins {
 		onSessionOpenStart := time.Now()
+		// Call OnSessionOpen for each plugin
 		plugin.OnSessionOpen(ssn)
 		metrics.UpdatePluginDuration(plugin.Name(), metrics.OnSessionOpen, metrics.Duration(onSessionOpenStart))
 	}

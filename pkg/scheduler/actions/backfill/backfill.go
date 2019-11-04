@@ -50,7 +50,7 @@ func (alloc *backfillAction) Execute(ssn *framework.Session) {
 				for _, node := range ssn.Nodes {
 					// TODO (k82cn): predicates did not consider pod number for now, there'll
 					// be ping-pong case here.
-					if err := ssn.PredicateFn(task, node); err != nil {
+					if err := ssn.RunPredicatePlugins(task, node); err != nil {
 						glog.V(3).Infof("Predicates failed for task <%s/%s> on node <%s>: %v",
 							task.Namespace, task.Name, node.Name, err)
 						continue

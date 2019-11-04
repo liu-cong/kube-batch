@@ -39,6 +39,7 @@ type Session struct {
 
 	cache cache.Cache
 
+	// TODO these maps are essentially Sets, modify them to Set
 	Jobs    map[api.JobID]*api.JobInfo
 	Nodes   map[string]*api.NodeInfo
 	Queues  map[api.QueueID]*api.QueueInfo
@@ -83,6 +84,7 @@ func openSession(cache cache.Cache) *Session {
 		nodePrioritizers: map[string][]algorithm.PriorityConfig{},
 	}
 
+	// take a snapshot
 	snapshot := cache.Snapshot()
 
 	ssn.Jobs = snapshot.Jobs
@@ -190,47 +192,11 @@ func (ssn *Session) Statement() *Statement {
 	}
 }
 
+// Pipeline code is similar to Allocate, the difference is the task status. Allocate also does binding.
 // Pipeline  the task to the node in the session
 func (ssn *Session) Pipeline(task *api.TaskInfo, hostname string) error {
-	// Only update status in session
-	job, found := ssn.Jobs[task.Job]
-	if found {
-		if err := job.UpdateTaskStatus(task, api.Pipelined); err != nil {
-			glog.Errorf("Failed to update task <%v/%v> status to %v in Session <%v>: %v",
-				task.Namespace, task.Name, api.Pipelined, ssn.UID, err)
-			return err
-		}
-	} else {
-		glog.Errorf("Failed to found Job <%s> in Session <%s> index when binding.",
-			task.Job, ssn.UID)
-		return fmt.Errorf("failed to find job %s when binding", task.Job)
-	}
-
-	task.NodeName = hostname
-
-	if node, found := ssn.Nodes[hostname]; found {
-		if err := node.AddTask(task); err != nil {
-			glog.Errorf("Failed to add task <%v/%v> to node <%v> in Session <%v>: %v",
-				task.Namespace, task.Name, hostname, ssn.UID, err)
-			return err
-		}
-		glog.V(3).Infof("After added Task <%v/%v> to Node <%v>: idle <%v>, used <%v>, releasing <%v>",
-			task.Namespace, task.Name, node.Name, node.Idle, node.Used, node.Releasing)
-	} else {
-		glog.Errorf("Failed to found Node <%s> in Session <%s> index when binding.",
-			hostname, ssn.UID)
-		return fmt.Errorf("failed to find node %s", hostname)
-	}
-
-	for _, eh := range ssn.eventHandlers {
-		if eh.AllocateFunc != nil {
-			eh.AllocateFunc(&Event{
-				Task: task,
-			})
-		}
-	}
-
-	return nil
+	_, err := ssn.assignTaskToNode(task, hostname, api.Pipelined)
+	return err
 }
 
 //Allocate the task to the node in the session
@@ -239,43 +205,9 @@ func (ssn *Session) Allocate(task *api.TaskInfo, hostname string) error {
 		return err
 	}
 
-	// Only update status in session
-	job, found := ssn.Jobs[task.Job]
-	if found {
-		if err := job.UpdateTaskStatus(task, api.Allocated); err != nil {
-			glog.Errorf("Failed to update task <%v/%v> status to %v in Session <%v>: %v",
-				task.Namespace, task.Name, api.Allocated, ssn.UID, err)
-			return err
-		}
-	} else {
-		glog.Errorf("Failed to found Job <%s> in Session <%s> index when binding.",
-			task.Job, ssn.UID)
-		return fmt.Errorf("failed to find job %s", task.Job)
-	}
-
-	task.NodeName = hostname
-
-	if node, found := ssn.Nodes[hostname]; found {
-		if err := node.AddTask(task); err != nil {
-			glog.Errorf("Failed to add task <%v/%v> to node <%v> in Session <%v>: %v",
-				task.Namespace, task.Name, hostname, ssn.UID, err)
-			return err
-		}
-		glog.V(3).Infof("After allocated Task <%v/%v> to Node <%v>: idle <%v>, used <%v>, releasing <%v>",
-			task.Namespace, task.Name, node.Name, node.Idle, node.Used, node.Releasing)
-	} else {
-		glog.Errorf("Failed to found Node <%s> in Session <%s> index when binding.",
-			hostname, ssn.UID)
-		return fmt.Errorf("failed to find node %s", hostname)
-	}
-
-	// Callbacks
-	for _, eh := range ssn.eventHandlers {
-		if eh.AllocateFunc != nil {
-			eh.AllocateFunc(&Event{
-				Task: task,
-			})
-		}
+	job, err := ssn.assignTaskToNode(task, hostname, api.Allocated)
+	if err != nil {
+		return err
 	}
 
 	if ssn.JobReady(job) {
@@ -291,6 +223,50 @@ func (ssn *Session) Allocate(task *api.TaskInfo, hostname string) error {
 	return nil
 }
 
+func (ssn *Session) assignTaskToNode(task *api.TaskInfo, hostname string, status api.TaskStatus) (*api.JobInfo, error) {
+	// Only update status in session
+	job, found := ssn.Jobs[task.Job]
+	if found {
+		if err := job.UpdateTaskStatus(task, status); err != nil {
+			glog.Errorf("Failed to update task <%v/%v> status to %v in Session <%v>: %v",
+				task.Namespace, task.Name, status, ssn.UID, err)
+			return nil, err
+		}
+	} else {
+		glog.Errorf("Failed to found Job <%s> in Session <%s> index when binding.",
+			task.Job, ssn.UID)
+		return nil, fmt.Errorf("failed to find job %s when binding", task.Job)
+	}
+
+	task.NodeName = hostname
+
+	if node, found := ssn.Nodes[hostname]; found {
+		if err := node.AddTask(task); err != nil {
+			glog.Errorf("Failed to add task <%v/%v> to node <%v> in Session <%v>: %v",
+				task.Namespace, task.Name, hostname, ssn.UID, err)
+			return nil, err
+		}
+		glog.V(3).Infof("After added Task <%v/%v> to Node <%v>: idle <%v>, used <%v>, releasing <%v>",
+			task.Namespace, task.Name, node.Name, node.Idle, node.Used, node.Releasing)
+	} else {
+		glog.Errorf("Failed to found Node <%s> in Session <%s> index when binding.",
+			hostname, ssn.UID)
+		return nil, fmt.Errorf("failed to find node %s", hostname)
+	}
+
+	// Callbacks
+	for _, eh := range ssn.eventHandlers {
+		if eh.AllocateFunc != nil {
+			eh.AllocateFunc(&Event{
+				Task: task,
+			})
+		}
+	}
+
+	return job, nil
+}
+
+// dispatch calls bind
 func (ssn *Session) dispatch(task *api.TaskInfo) error {
 	if err := ssn.cache.BindVolumes(task); err != nil {
 		return err

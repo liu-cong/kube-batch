@@ -59,8 +59,9 @@ func (h HostPriorityList) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
 }
 
-// PredicateNodes returns nodes that fit task
-func PredicateNodes(task *api.TaskInfo, nodes []*api.NodeInfo, fn api.PredicateFn) []*api.NodeInfo {
+// FilterNodes returns nodes that fit task using the PredicateFn
+// Think of task as a pod?
+func FilterNodes(task *api.TaskInfo, nodes []*api.NodeInfo, fn api.PredicateFn) []*api.NodeInfo {
 	var predicateNodes []*api.NodeInfo
 
 	var workerLock sync.Mutex

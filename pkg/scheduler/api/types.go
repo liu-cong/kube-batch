@@ -19,11 +19,13 @@ package api
 // TaskStatus defines the status of a task/pod.
 type TaskStatus int
 
+// Task status
 const (
 	// Pending means the task is pending in the apiserver.
 	Pending TaskStatus = 1 << iota
 
 	// Allocated means the scheduler assigns a host to it.
+	// Q: Is this similar to "assume" in scheduler?
 	Allocated
 
 	// Pipelined means the scheduler assigns a host to wait for releasing resource.
@@ -119,7 +121,7 @@ type ValidateResult struct {
 // ValidateExFn is the func declaration used to validate the result
 type ValidateExFn func(interface{}) *ValidateResult
 
-// PredicateFn is the func declaration used to predicate node for task.
+// RunPredicatePlugins is the func declaration used to predicate node for task.
 type PredicateFn func(*TaskInfo, *NodeInfo) error
 
 // EvictableFn is the func declaration used to evict tasks.

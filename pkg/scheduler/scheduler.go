@@ -82,6 +82,7 @@ func (pc *Scheduler) Run(stopCh <-chan struct{}) {
 		panic(err)
 	}
 
+	// periodically run runOnce, default is 1 second
 	go wait.Until(pc.runOnce, pc.schedulePeriod, stopCh)
 }
 
@@ -91,9 +92,11 @@ func (pc *Scheduler) runOnce() {
 	defer glog.V(4).Infof("End scheduling ...")
 	defer metrics.UpdateE2eDuration(metrics.Duration(scheduleStartTime))
 
+	// open session
 	ssn := framework.OpenSession(pc.cache, pc.plugins)
 	defer framework.CloseSession(ssn)
 
+	// perform actions
 	for _, action := range pc.actions {
 		actionStartTime := time.Now()
 		action.Execute(ssn)

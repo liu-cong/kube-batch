@@ -90,7 +90,7 @@ func (alloc *reclaimAction) Execute(ssn *framework.Session) {
 		var task *api.TaskInfo
 
 		queue := queues.Pop().(*api.QueueInfo)
-		if ssn.Overused(queue) {
+		if ssn.RunOverusedPlugins(queue) {
 			glog.V(3).Infof("Queue <%s> is overused, ignore it.", queue.Name)
 			continue
 		}
@@ -112,7 +112,7 @@ func (alloc *reclaimAction) Execute(ssn *framework.Session) {
 		assigned := false
 		for _, n := range ssn.Nodes {
 			// If predicates failed, next node.
-			if err := ssn.PredicateFn(task, n); err != nil {
+			if err := ssn.RunPredicatePlugins(task, n); err != nil {
 				continue
 			}
 

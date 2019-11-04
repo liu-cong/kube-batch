@@ -40,6 +40,7 @@ type TaskInfo struct {
 	Name      string
 	Namespace string
 
+	// TODO what's the difference between Resreq and InitResreq?
 	// Resreq is the resource that used when task running.
 	Resreq *Resource
 	// InitResreq is the resource that used to launch a task.

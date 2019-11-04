@@ -179,7 +179,7 @@ func preempt(
 
 	allNodes := util.GetNodeList(nodes)
 
-	predicateNodes := util.PredicateNodes(preemptor, allNodes, ssn.PredicateFn)
+	predicateNodes := util.FilterNodes(preemptor, allNodes, ssn.RunPredicatePlugins)
 
 	priorityList, err := util.PrioritizeNodes(preemptor, predicateNodes, ssn.NodePrioritizers())
 	if err != nil {

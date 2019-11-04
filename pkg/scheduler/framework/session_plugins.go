@@ -161,8 +161,8 @@ func (ssn *Session) Preemptable(preemptor *api.TaskInfo, preemptees []*api.TaskI
 	return victims
 }
 
-// Overused invoke overused function of the plugins
-func (ssn *Session) Overused(queue *api.QueueInfo) bool {
+// RunOverusedPlugins invoke overused function of the plugins
+func (ssn *Session) RunOverusedPlugins(queue *api.QueueInfo) bool {
 	for _, tier := range ssn.Tiers {
 		for _, plugin := range tier.Plugins {
 			of, found := ssn.overusedFns[plugin.Name]
@@ -330,8 +330,8 @@ func (ssn *Session) TaskOrderFn(l, r interface{}) bool {
 
 }
 
-// PredicateFn invoke predicate function of the plugins
-func (ssn *Session) PredicateFn(task *api.TaskInfo, node *api.NodeInfo) error {
+// RunPredicatePlugins invoke predicate function of the plugins
+func (ssn *Session) RunPredicatePlugins(task *api.TaskInfo, node *api.NodeInfo) error {
 	for _, tier := range ssn.Tiers {
 		for _, plugin := range tier.Plugins {
 			if !isEnabled(plugin.EnabledPredicate) {
